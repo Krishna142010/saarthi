@@ -142,7 +142,7 @@ env.allowLocalModels = false;
 
 const $ = id => document.getElementById(id);
 const MODEL = "Xenova/LaMini-Flan-T5-77M";
-const MAX_CHARS = 6000;
+const MAX_CHARS = 200000; // about 80-100 pages of text
 let gen = null, busy = false, mode = "summary", abort = false, loading = false;
 
 /* ---------- model loading (≈80 MB, cached after first time) ---------- */
@@ -220,7 +220,7 @@ function esc(s){ return s.replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">"
 /* ---------- notes + file upload (PDF, DOCX, image OCR, text) ---------- */
 function updateCount(){
   const n = $("notes").value.trim().length;
-  $("count").textContent = n ? `${n} characters` + (n > MAX_CHARS ? ` (only the first ${MAX_CHARS} are used – paste one section at a time for best results)` : "") : "";
+  $("count").textContent = n ? `${n} characters` + (n > MAX_CHARS ? ` (very long file: only the first ${MAX_CHARS} characters are used)` : "") : "";
 }
 $("notes").addEventListener("input", updateCount);
 $("sample").onclick = () => {
@@ -314,7 +314,7 @@ $("runBtn").onclick = async () => {
   busy = true; abort = false;
   $("stopBtn").style.display = ""; $("runBtn").disabled = true; $("out").textContent = "Thinking…";
   const simple = mode === "simple";
-  const chunks = pick(chunkText(notes(), simple ? 500 : 700), simple ? 3 : 6);
+  const chunks = pick(chunkText(notes(), simple ? 600 : 1000), simple ? 12 : 40); // whole document, in parts
   let result = "";
   for (let i = 0; i < chunks.length && !abort; i++) {
     const prompt = simple
@@ -322,7 +322,7 @@ $("runBtn").onclick = async () => {
       : `Summarize the following text in one clear sentence:\n\n${chunks[i]}`;
     const t = await run(prompt, simple ? 120 : 70);
     if (t) result += (simple ? "" : "• ") + t + "\n" + (simple ? "\n" : "");
-    $("out").textContent = result + (i < chunks.length - 1 ? "…" : "");
+    $("out").textContent = result + (i < chunks.length - 1 ? `\n⏳ Working… part ${i + 1} of ${chunks.length} done` : "");
   }
   if (!result) $("out").textContent = "Couldn't generate anything. Try adding more text.";
   $("stopBtn").style.display = "none"; $("runBtn").disabled = false; busy = false;
