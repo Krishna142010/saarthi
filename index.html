@@ -83,7 +83,9 @@
       <div>
         <label for="model">Model (smaller = faster download)</label>
         <select id="model">
-          <option value="Qwen2.5-0.5B-Instruct-q4f16_1-MLC" selected>⚡ Qwen 2.5 0.5B (Alibaba) – fastest, ~0.4 GB</option>
+          <option value="SmolLM2-135M-Instruct-q0f16-MLC" selected>🪶 SmolLM2 135M (HuggingFace) – tiniest, ~0.27 GB</option>
+          <option value="SmolLM2-360M-Instruct-q4f16_1-MLC">⚡ SmolLM2 360M (HuggingFace) – tiny, ~0.2 GB</option>
+          <option value="Qwen2.5-0.5B-Instruct-q4f16_1-MLC">Qwen 2.5 0.5B (Alibaba) – small, ~0.4 GB</option>
           <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama 3.2 1B (Meta) – balanced, ~0.7 GB</option>
           <option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC">Qwen 2.5 1.5B (Alibaba) – better quality, ~1 GB</option>
           <option value="gemma-2-2b-it-q4f16_1-MLC">Gemma 2 2B (Google) – best quality, ~1.6 GB</option>
@@ -270,7 +272,10 @@ $("loadBtn").onclick = async () => {
     setReady(true);
   } catch (err) {
     console.error(err);
-    $("status").textContent = "❌ Could not load the model: " + (err.message || err) + ". Try a smaller model or Chrome/Edge.";
+    const msg = String(err.message || err);
+    $("status").textContent = /quota/i.test(msg)
+      ? "❌ Your browser has no free storage space for the model. Don't use a private/incognito window, free some disk space, or pick a smaller model. (Site settings → Clear data for this site can also help.)"
+      : "❌ Could not load the model: " + msg + ". Try a smaller model or Chrome/Edge.";
   }
   $("loadBtn").disabled = false;
 };
