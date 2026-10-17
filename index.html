@@ -52,7 +52,6 @@
   .msg{padding:9px 12px;border-radius:12px;max-width:88%;white-space:pre-wrap}
   .msg.u{align-self:flex-end;background:var(--accent2)}
   .msg.a{align-self:flex-start;background:var(--card2);border:1px solid var(--border)}
-  .warn{background:rgba(255,94,108,.12);border:1px solid var(--bad);padding:10px 12px;border-radius:10px;display:none;margin-bottom:14px}
   footer{color:var(--muted);font-size:.8rem;text-align:center;margin-top:30px}
   a{color:var(--accent)}
 </style>
@@ -65,36 +64,21 @@
       <h1>Saarthi <span style="color:var(--muted);font-weight:500">· सारथी</span></h1>
     </div>
   </header>
-  <p class="tag">Your private AI study buddy. Paste any chapter and get a summary, quiz, flashcards or answers — in English or Hindi.</p>
+  <p class="tag">Your private AI study buddy. Paste or upload any chapter and get a summary, a simple explanation, a quiz, flashcards or answers.</p>
   <div class="badges">
     <span class="badge">🔒 100% private – runs in your browser</span>
+    <span class="badge">🪶 Tiny open-source model (~80 MB)</span>
     <span class="badge">📡 Works offline after first load</span>
-    <span class="badge">🧠 Open-source models (Llama · Qwen · Gemma)</span>
     <span class="badge">💸 No API key, no server, free</span>
   </div>
 
-  <div class="warn" id="gpuWarn">
-    ⚠️ Your browser doesn't support WebGPU. Please open this page in the latest <b>Chrome or Edge</b> on a laptop/desktop (Android Chrome also works on recent phones).
-  </div>
-
   <div class="card">
-    <h2>1 · Load an open-source AI model</h2>
+    <h2>1 · AI model <span style="color:var(--muted);font-weight:400;font-size:.85rem">· LaMini-Flan-T5 77M (open source)</span></h2>
     <div class="row">
-      <div>
-        <label for="model">Model (smaller = faster download)</label>
-        <select id="model">
-          <option value="SmolLM2-135M-Instruct-q0f16-MLC" selected>🪶 SmolLM2 135M (HuggingFace) – tiniest, ~0.27 GB</option>
-          <option value="SmolLM2-360M-Instruct-q4f16_1-MLC">⚡ SmolLM2 360M (HuggingFace) – tiny, ~0.2 GB</option>
-          <option value="Qwen2.5-0.5B-Instruct-q4f16_1-MLC">Qwen 2.5 0.5B (Alibaba) – small, ~0.4 GB</option>
-          <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama 3.2 1B (Meta) – balanced, ~0.7 GB</option>
-          <option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC">Qwen 2.5 1.5B (Alibaba) – better quality, ~1 GB</option>
-          <option value="gemma-2-2b-it-q4f16_1-MLC">Gemma 2 2B (Google) – best quality, ~1.6 GB</option>
-        </select>
-      </div>
-      <div style="flex:0 0 auto"><button id="loadBtn">Load model</button></div>
+      <div class="status" id="status" style="margin:0">Starting…</div>
+      <div style="flex:0 0 auto"><button id="loadBtn" class="sec">Reload model</button></div>
     </div>
     <div class="bar"><i id="bar"></i></div>
-    <div class="status" id="status">Model not loaded yet. Only the first load downloads it (start with the ⚡ fastest model); after that it's cached and loads in seconds, even offline.</div>
   </div>
 
   <div class="card">
@@ -104,14 +88,6 @@
       <div>
         <label for="file">Upload PDF, Word (.docx), image or text</label>
         <input id="file" type="file" accept=".pdf,.docx,.txt,.md,image/*,application/pdf,text/plain">
-      </div>
-      <div>
-        <label for="lang">Answer language</label>
-        <select id="lang">
-          <option value="English">English</option>
-          <option value="Hindi (हिन्दी, in Devanagari script)">हिन्दी (Hindi)</option>
-          <option value="Hinglish (Hindi written in English letters)">Hinglish</option>
-        </select>
       </div>
       <div style="flex:0 0 auto;display:flex;gap:8px">
         <button class="sec" id="sample">Try sample</button>
@@ -157,28 +133,105 @@
     </div>
   </div>
 
-  <footer>Built for a hackathon with ❤️ · Powered by <a href="https://github.com/mlc-ai/web-llm" target="_blank" rel="noopener">WebLLM</a> &amp; open-source models · Your notes never leave your device.</footer>
+  <footer>Built for a hackathon with ❤️ · Powered by <a href="https://github.com/xenova/transformers.js" target="_blank" rel="noopener">Transformers.js</a> &amp; the open-source LaMini-Flan-T5 model · Your notes never leave your device.<br>This is a very small model, so keep notes in English and double-check important answers.</footer>
 </div>
 
 <script type="module">
-import * as webllm from "https://esm.run/@mlc-ai/web-llm";
+import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2";
+env.allowLocalModels = false;
 
 const $ = id => document.getElementById(id);
-const MAX_CHARS = 6000; // small models have ~4k token context
-let engine = null, busy = false, mode = "summary", abort = false;
-let chatHistory = [];
+const MODEL = "Xenova/LaMini-Flan-T5-77M";
+const MAX_CHARS = 6000;
+let gen = null, busy = false, mode = "summary", abort = false, loading = false;
 
-if (!("gpu" in navigator)) $("gpuWarn").style.display = "block";
+/* ---------- model loading (≈80 MB, cached after first time) ---------- */
+function setReady(on){ ["runBtn","quizBtn","cardsBtn","askBtn"].forEach(id => $(id).disabled = !on); }
 
-/* ---------- notes handling ---------- */
+async function loadModel(){
+  if (loading) return;
+  loading = true; gen = null; setReady(false);
+  $("loadBtn").disabled = true; $("bar").style.width = "0%";
+  $("status").textContent = "Starting…";
+  const files = {};
+  const progress = p => {
+    if (p.status === "progress") {
+      files[p.file] = { l: p.loaded, t: p.total };
+      let l = 0, t = 0; for (const f in files) { l += files[f].l; t += files[f].t; }
+      if (t) $("bar").style.width = Math.round(l / t * 100) + "%";
+      $("status").textContent = `Downloading AI model… ${(l / 1e6).toFixed(0)} / ${(t / 1e6).toFixed(0)} MB (only the first time)`;
+    } else if (p.status === "ready") {
+      $("status").textContent = "Starting model…";
+    }
+  };
+  try {
+    try {
+      gen = await pipeline("text2text-generation", MODEL, { progress_callback: progress });
+    } catch (err) {
+      if (/quota/i.test(String(err.message || err))) {
+        // browser has no room to cache → run without caching (re-downloads next visit)
+        env.useBrowserCache = false;
+        $("status").textContent = "Browser storage is full, loading without saving the model…";
+        gen = await pipeline("text2text-generation", MODEL, { progress_callback: progress });
+      } else throw err;
+    }
+    $("bar").style.width = "100%";
+    $("status").textContent = "✅ Model ready! Everything runs on your device.";
+    setReady(true);
+  } catch (err) {
+    console.error(err);
+    $("status").textContent = "❌ Could not load the model: " + (err.message || err) + ". Check your internet connection and press “Reload model”.";
+  }
+  loading = false; $("loadBtn").disabled = false;
+}
+$("loadBtn").onclick = loadModel;
+loadModel();
+
+/* ---------- text helpers ---------- */
 const notes = () => $("notes").value.trim().slice(0, MAX_CHARS);
+const tick = () => new Promise(r => setTimeout(r, 0));
+
+function chunkText(text, size){
+  const sentences = text.replace(/\s+/g, " ").match(/[^.!?।]+[.!?।]*/g) || [text];
+  const chunks = []; let cur = "";
+  for (const s of sentences) {
+    if (cur && (cur + s).length > size) { chunks.push(cur.trim()); cur = ""; }
+    cur += s + " ";
+  }
+  if (cur.trim()) chunks.push(cur.trim());
+  return chunks.filter(c => c.length > 40);
+}
+function pick(arr, n){
+  if (arr.length <= n) return arr;
+  return Array.from({ length: n }, (_, i) => arr[Math.floor(i * arr.length / n)]);
+}
+async function run(prompt, max = 100){
+  const out = await gen(prompt, { max_new_tokens: max, do_sample: false, repetition_penalty: 1.2 });
+  await tick();
+  return (out[0].generated_text || "").trim();
+}
+function needNotes(){
+  if (!gen) { alert("The AI model is still loading. Please wait for the ✅ message."); return false; }
+  if (notes().length < 60) { alert("Please add some study material first (step 2)."); return false; }
+  return true;
+}
+function esc(s){ return s.replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
+
+/* ---------- notes + file upload (PDF, DOCX, image OCR, text) ---------- */
 function updateCount(){
   const n = $("notes").value.trim().length;
   $("count").textContent = n ? `${n} characters` + (n > MAX_CHARS ? ` (only the first ${MAX_CHARS} are used – paste one section at a time for best results)` : "") : "";
 }
 $("notes").addEventListener("input", updateCount);
+$("sample").onclick = () => {
+  $("notes").value = `Photosynthesis is the process by which green plants, algae and some bacteria convert light energy into chemical energy. It takes place mainly in the chloroplasts of leaf cells, which contain a green pigment called chlorophyll. Chlorophyll absorbs sunlight, mostly in the red and blue wavelengths, and reflects green light, which is why leaves look green.
 
-/* ---------- file upload: PDF, DOCX, image (OCR), text — all processed in the browser ---------- */
+The overall reaction is: carbon dioxide + water + light energy -> glucose + oxygen. Plants take in carbon dioxide through tiny pores called stomata and absorb water from the soil through their roots. The glucose produced is used by the plant for energy and growth, or stored as starch. Oxygen is released into the atmosphere as a by-product, which is essential for most living organisms.
+
+Photosynthesis has two stages. In the light-dependent reactions, which occur in the thylakoid membranes, light energy splits water molecules, releasing oxygen and producing the energy carriers ATP and NADPH. In the Calvin cycle, which occurs in the stroma, ATP and NADPH are used to convert carbon dioxide into glucose. Factors such as light intensity, carbon dioxide concentration and temperature affect the rate of photosynthesis.`;
+  updateCount();
+};
+
 const setMsg = t => { $("count").textContent = t; };
 const loadScript = src => new Promise((res, rej) => {
   if (document.querySelector(`script[src="${src}"]`)) return res();
@@ -188,7 +241,7 @@ const loadScript = src => new Promise((res, rej) => {
 });
 async function ocr(source){
   await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js");
-  const r = await Tesseract.recognize(source, "eng+hin", {
+  const r = await Tesseract.recognize(source, "eng", {
     logger: m => { if (m.status === "recognizing text") setMsg(`Reading text from image… ${Math.round(m.progress * 100)}%`); }
   });
   return r.data.text;
@@ -205,7 +258,7 @@ async function readPdf(file){
     const c = await page.getTextContent();
     text += c.items.map(x => x.str).join(" ") + "\n\n";
   }
-  if (text.trim().length < 50) { // scanned PDF with no text layer → OCR the first pages
+  if (text.trim().length < 50) {
     text = "";
     for (let i = 1; i <= Math.min(pdf.numPages, 5); i++) {
       setMsg(`Scanned PDF detected – reading page ${i}…`);
@@ -243,69 +296,6 @@ $("file").addEventListener("change", async e => {
   }
   e.target.value = "";
 });
-$("sample").onclick = () => {
-  $("notes").value = `Photosynthesis is the process by which green plants, algae and some bacteria convert light energy into chemical energy. It takes place mainly in the chloroplasts of leaf cells, which contain a green pigment called chlorophyll. Chlorophyll absorbs sunlight, mostly in the red and blue wavelengths, and reflects green light, which is why leaves look green.
-
-The overall reaction is: carbon dioxide + water + light energy -> glucose + oxygen. Plants take in carbon dioxide through tiny pores called stomata and absorb water from the soil through their roots. The glucose produced is used by the plant for energy and growth, or stored as starch. Oxygen is released into the atmosphere as a by-product, which is essential for most living organisms.
-
-Photosynthesis has two stages. In the light-dependent reactions, which occur in the thylakoid membranes, light energy splits water molecules, releasing oxygen and producing the energy carriers ATP and NADPH. In the Calvin cycle, which occurs in the stroma, ATP and NADPH are used to convert carbon dioxide into glucose. Factors such as light intensity, carbon dioxide concentration and temperature affect the rate of photosynthesis.`;
-  updateCount();
-};
-
-/* ---------- model loading ---------- */
-function setReady(on){
-  ["runBtn","quizBtn","cardsBtn","askBtn"].forEach(id => $(id).disabled = !on);
-}
-$("loadBtn").onclick = async () => {
-  if (!("gpu" in navigator)) { $("gpuWarn").style.display = "block"; return; }
-  $("loadBtn").disabled = true; setReady(false);
-  $("status").textContent = "Starting…"; $("bar").style.width = "0%";
-  try {
-    engine = await webllm.CreateMLCEngine($("model").value, {
-      initProgressCallback: r => {
-        $("bar").style.width = Math.round((r.progress || 0) * 100) + "%";
-        $("status").textContent = r.text;
-      }
-    });
-    $("bar").style.width = "100%";
-    $("status").textContent = "✅ Model ready! Everything now runs on your device.";
-    setReady(true);
-  } catch (err) {
-    console.error(err);
-    const msg = String(err.message || err);
-    $("status").textContent = /quota/i.test(msg)
-      ? "❌ Your browser has no free storage space for the model. Don't use a private/incognito window, free some disk space, or pick a smaller model. (Site settings → Clear data for this site can also help.)"
-      : "❌ Could not load the model: " + msg + ". Try a smaller model or Chrome/Edge.";
-  }
-  $("loadBtn").disabled = false;
-};
-
-/* ---------- LLM helpers ---------- */
-async function generate(system, user, onToken, opts = {}){
-  busy = true; abort = false;
-  let text = "";
-  try {
-    const stream = await engine.chat.completions.create({
-      messages: [{ role: "system", content: system }, ...(opts.history || []), { role: "user", content: user }],
-      stream: true,
-      temperature: opts.temp ?? 0.5,
-      max_tokens: opts.max ?? 700
-    });
-    for await (const ch of stream) {
-      if (abort) break;
-      const d = ch.choices[0]?.delta?.content || "";
-      text += d;
-      if (onToken) onToken(text);
-    }
-  } finally { busy = false; }
-  return text;
-}
-function needNotes(){
-  if (!engine) { alert("Please load a model first (step 1)."); return false; }
-  if (notes().length < 40) { alert("Please add some study material first (step 2)."); return false; }
-  return true;
-}
-const L = () => $("lang").value;
 
 /* ---------- modes ---------- */
 $("modes").addEventListener("click", e => {
@@ -318,60 +308,66 @@ $("modes").addEventListener("click", e => {
   $("askPane").style.display = mode === "ask" ? "" : "none";
 });
 
-/* summary + explain simply */
+/* summary + explain simply (chunk by chunk) */
 $("runBtn").onclick = async () => {
   if (busy || !needNotes()) return;
-  $("out").textContent = "Thinking…";
-  $("stopBtn").style.display = ""; $("runBtn").disabled = true;
-  const sys = mode === "summary"
-    ? `You are Saarthi, a helpful study assistant. Write in ${L()}. Summarise the student's notes as 5-7 short bullet points of the key ideas, followed by one line starting with "Remember:" giving the single most important takeaway.`
-    : `You are Saarthi, a friendly teacher. Write in ${L()}. Explain the student's notes as if to a curious 12-year-old, using a simple everyday analogy from Indian daily life where possible. Keep it under 180 words.`;
-  await generate(sys, notes(), t => $("out").textContent = t);
-  $("stopBtn").style.display = "none"; $("runBtn").disabled = false;
+  busy = true; abort = false;
+  $("stopBtn").style.display = ""; $("runBtn").disabled = true; $("out").textContent = "Thinking…";
+  const simple = mode === "simple";
+  const chunks = pick(chunkText(notes(), simple ? 500 : 700), simple ? 3 : 6);
+  let result = "";
+  for (let i = 0; i < chunks.length && !abort; i++) {
+    const prompt = simple
+      ? `Explain the following text in very simple words, as if talking to a 10 year old child:\n\n${chunks[i]}`
+      : `Summarize the following text in one clear sentence:\n\n${chunks[i]}`;
+    const t = await run(prompt, simple ? 120 : 70);
+    if (t) result += (simple ? "" : "• ") + t + "\n" + (simple ? "\n" : "");
+    $("out").textContent = result + (i < chunks.length - 1 ? "…" : "");
+  }
+  if (!result) $("out").textContent = "Couldn't generate anything. Try adding more text.";
+  $("stopBtn").style.display = "none"; $("runBtn").disabled = false; busy = false;
 };
 $("stopBtn").onclick = () => { abort = true; };
 
-/* quiz */
-function parseQuiz(text){
-  const blocks = text.split(/\n\s*(?=Q\s*\d*\s*[:.)])/i).filter(b => /Answer/i.test(b));
-  const out = [];
-  for (const b of blocks) {
-    const q = (b.match(/Q\s*\d*\s*[:.)]\s*(.+)/i) || [])[1];
-    const opts = [...b.matchAll(/^\s*([A-D])[).:]\s*(.+)$/gim)].map(m => ({ k: m[1].toUpperCase(), t: m[2].trim() }));
-    const ans = (b.match(/Answer\s*[:\-]?\s*\(?([A-D])/i) || [])[1];
-    if (q && opts.length >= 3 && ans) out.push({ q: q.trim(), opts, ans: ans.toUpperCase() });
+/* question + answer pairs (used by quiz and flashcards) */
+async function makeQA(count, onProgress){
+  const chunks = pick(chunkText(notes(), 350), count);
+  const items = [];
+  for (let i = 0; i < chunks.length; i++) {
+    onProgress(i + 1, chunks.length);
+    let q = await run(`Write one question that can be answered using this text:\n\n${chunks[i]}`, 40);
+    if (q.length < 8) continue;
+    if (!/[?]$/.test(q)) q = q.replace(/[.!]+$/, "") + "?";
+    let a = await run(`Answer the question briefly using the text.\n\nText: ${chunks[i]}\n\nQuestion: ${q}`, 40);
+    if (a.length < 2) continue;
+    items.push({ q, a: a.replace(/\.$/, "") });
   }
-  return out;
+  return items;
 }
+
+/* quiz */
 $("quizBtn").onclick = async () => {
   if (busy || !needNotes()) return;
-  $("quiz").innerHTML = ""; $("score").textContent = "Writing your quiz…"; $("quizBtn").disabled = true;
-  const sys = `You are a teacher making a multiple-choice quiz. Write in ${L()}. Create exactly 4 questions from the student's notes. Use EXACTLY this format for each, with no extra commentary:
-Q1: question text
-A) option
-B) option
-C) option
-D) option
-Answer: B`;
-  let items = [];
-  for (let attempt = 0; attempt < 2 && items.length < 2; attempt++) {
-    const raw = await generate(sys, notes(), null, { temp: 0.4, max: 900 });
-    items = parseQuiz(raw);
-  }
-  $("quizBtn").disabled = false;
-  if (!items.length) { $("score").textContent = "The model's answer wasn't in the right format. Please press the button again (or try a bigger model)."; return; }
+  busy = true; $("quizBtn").disabled = true; $("quiz").innerHTML = "";
+  $("score").textContent = "Writing your quiz…";
+  const qa = await makeQA(5, (i, n) => { $("score").textContent = `Writing question ${i} of ${n}…`; });
+  busy = false; $("quizBtn").disabled = false;
+  if (qa.length < 2) { $("score").textContent = "Not enough content to build a quiz. Add more text and try again."; return; }
   let done = 0, right = 0;
-  $("score").textContent = `Answer all ${items.length} questions!`;
-  items.forEach((it, i) => {
+  $("score").textContent = `Answer all ${qa.length} questions!`;
+  qa.forEach((it, i) => {
+    const wrongs = qa.filter((x, j) => j !== i && x.a.toLowerCase() !== it.a.toLowerCase()).map(x => x.a)
+      .sort(() => Math.random() - .5).slice(0, 3);
+    const options = [it.a, ...wrongs].sort(() => Math.random() - .5);
     const d = document.createElement("div"); d.className = "q";
     d.innerHTML = `<b>${i + 1}. ${esc(it.q)}</b>`;
-    it.opts.forEach(o => {
-      const b = document.createElement("button"); b.className = "opt"; b.textContent = `${o.k}) ${o.t}`;
+    options.forEach(opt => {
+      const b = document.createElement("button"); b.className = "opt"; b.textContent = opt;
       b.onclick = () => {
         if (d.dataset.done) return; d.dataset.done = 1; done++;
-        if (o.k === it.ans) { b.classList.add("right"); right++; }
-        else { b.classList.add("wrong"); [...d.querySelectorAll(".opt")].forEach(x => { if (x.textContent.startsWith(it.ans + ")")) x.classList.add("right"); }); }
-        $("score").textContent = done === items.length ? `🎉 Score: ${right} / ${items.length}` : `Answered ${done} / ${items.length}`;
+        if (opt === it.a) { b.classList.add("right"); right++; }
+        else { b.classList.add("wrong"); [...d.querySelectorAll(".opt")].forEach(x => { if (x.textContent === it.a) x.classList.add("right"); }); }
+        $("score").textContent = done === qa.length ? `🎉 Score: ${right} / ${qa.length}` : `Answered ${done} / ${qa.length}`;
       };
       d.appendChild(b);
     });
@@ -382,34 +378,41 @@ Answer: B`;
 /* flashcards */
 $("cardsBtn").onclick = async () => {
   if (busy || !needNotes()) return;
-  $("cards").innerHTML = ""; $("cardsHint").textContent = "Making flashcards…"; $("cardsBtn").disabled = true;
-  const sys = `You make study flashcards. Write in ${L()}. Create 6 flashcards from the student's notes. Output ONLY lines in this exact format, one per card:
-Front: short question or term | Back: short answer`;
-  const raw = await generate(sys, notes(), null, { temp: 0.4, max: 700 });
-  const cards = [...raw.matchAll(/Front\s*:\s*(.+?)\s*\|\s*Back\s*:\s*(.+)/gi)].map(m => ({ f: m[1], b: m[2] }));
-  $("cardsBtn").disabled = false;
-  if (!cards.length) { $("cardsHint").textContent = "Couldn't read the model output. Please try again."; return; }
+  busy = true; $("cardsBtn").disabled = true; $("cards").innerHTML = "";
+  const qa = await makeQA(6, (i, n) => { $("cardsHint").textContent = `Making card ${i} of ${n}…`; });
+  busy = false; $("cardsBtn").disabled = false;
+  if (!qa.length) { $("cardsHint").textContent = "Couldn't make cards. Add more text and try again."; return; }
   $("cardsHint").textContent = "Tap a card to flip it.";
-  cards.forEach(c => {
+  qa.forEach(c => {
     const el = document.createElement("div"); el.className = "fc";
-    el.innerHTML = `<div><div class="f">${esc(c.f)}</div><div class="b">${esc(c.b)}</div></div>`;
+    el.innerHTML = `<div><div class="f">${esc(c.q)}</div><div class="b">${esc(c.a)}</div></div>`;
     el.onclick = () => el.classList.toggle("flip");
     $("cards").appendChild(el);
   });
 };
 
-/* ask */
+/* ask: find the most relevant part of the notes, then answer from it */
+function bestContext(question){
+  const words = new Set((question.toLowerCase().match(/[a-z0-9]{4,}/g) || []));
+  const chunks = chunkText(notes(), 450);
+  const scored = chunks.map(c => {
+    const cw = c.toLowerCase();
+    let s = 0; words.forEach(w => { if (cw.includes(w)) s++; });
+    return { c, s };
+  }).sort((a, b) => b.s - a.s);
+  return scored.slice(0, 2).map(x => x.c).join(" ");
+}
 async function ask(){
   const q = $("askInput").value.trim();
   if (!q || busy || !needNotes()) return;
-  $("askInput").value = "";
+  busy = true; $("askInput").value = ""; $("askBtn").disabled = true;
   addMsg("u", q);
   const m = addMsg("a", "…");
-  const sys = `You are Saarthi, a study assistant. Answer in ${L()} using ONLY the notes below. If the answer isn't in the notes, say so honestly and give a brief general hint.\n\nNOTES:\n${notes()}`;
-  $("askBtn").disabled = true;
-  const reply = await generate(sys, q, t => { m.textContent = t; $("chatlog").scrollTop = 1e9; }, { history: chatHistory.slice(-4), max: 500 });
-  chatHistory.push({ role: "user", content: q }, { role: "assistant", content: reply });
-  $("askBtn").disabled = false;
+  const ctx = bestContext(q);
+  const a = await run(`Answer the question using the context.\n\nContext: ${ctx}\n\nQuestion: ${q}`, 120);
+  m.textContent = a || "I couldn't find that in your notes.";
+  $("chatlog").scrollTop = 1e9;
+  busy = false; $("askBtn").disabled = false;
 }
 function addMsg(who, t){
   const d = document.createElement("div"); d.className = "msg " + who; d.textContent = t;
@@ -417,8 +420,6 @@ function addMsg(who, t){
 }
 $("askBtn").onclick = ask;
 $("askInput").addEventListener("keydown", e => { if (e.key === "Enter") ask(); });
-
-function esc(s){ return s.replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
 </script>
 </body>
 </html>
