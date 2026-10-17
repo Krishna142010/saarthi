@@ -83,15 +83,16 @@
       <div>
         <label for="model">Model (smaller = faster download)</label>
         <select id="model">
-          <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama 3.2 1B (Meta) – fast, ~0.7 GB</option>
-          <option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC" selected>Qwen 2.5 1.5B (Alibaba) – balanced, ~1 GB</option>
+          <option value="Qwen2.5-0.5B-Instruct-q4f16_1-MLC" selected>⚡ Qwen 2.5 0.5B (Alibaba) – fastest, ~0.4 GB</option>
+          <option value="Llama-3.2-1B-Instruct-q4f16_1-MLC">Llama 3.2 1B (Meta) – balanced, ~0.7 GB</option>
+          <option value="Qwen2.5-1.5B-Instruct-q4f16_1-MLC">Qwen 2.5 1.5B (Alibaba) – better quality, ~1 GB</option>
           <option value="gemma-2-2b-it-q4f16_1-MLC">Gemma 2 2B (Google) – best quality, ~1.6 GB</option>
         </select>
       </div>
       <div style="flex:0 0 auto"><button id="loadBtn">Load model</button></div>
     </div>
     <div class="bar"><i id="bar"></i></div>
-    <div class="status" id="status">Model not loaded yet. The first load downloads it once, then it's cached on your device.</div>
+    <div class="status" id="status">Model not loaded yet. Only the first load downloads it (start with the ⚡ fastest model); after that it's cached and loads in seconds, even offline.</div>
   </div>
 
   <div class="card">
