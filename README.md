@@ -2,6 +2,8 @@
 
 An AI study assistant that runs **entirely in your browser** using open-source language models. Paste a chapter, or upload a **PDF, Word (.docx), image (photo of notes, read with OCR) or text file**, and get a summary, a simple explanation, an interactive quiz, flashcards, or answers to your questions in English.
 
+**🔗 Live demo:** [https://saarthi-seven-dusky.vercel.app/](https://saarthi-seven-dusky.vercel.app/)
+
 ## Why it's different
 - **Private:** notes never leave the device (no server, no API calls with your data).
 - **Free & offline-capable:** no API key. After the first download, the model is cached and works without internet.
