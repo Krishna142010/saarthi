@@ -96,11 +96,11 @@
 
   <div class="card">
     <h2>2 · Add your study material</h2>
-    <textarea id="notes" placeholder="Paste a chapter, notes or an article here… (or upload a .txt file below)"></textarea>
+    <textarea id="notes" placeholder="Paste a chapter, notes or an article here… (or upload a PDF, Word file, image or text file below)"></textarea>
     <div class="row" style="margin-top:10px">
       <div>
-        <label for="file">Upload .txt / .md</label>
-        <input id="file" type="file" accept=".txt,.md,text/plain">
+        <label for="file">Upload PDF, Word (.docx), image or text</label>
+        <input id="file" type="file" accept=".pdf,.docx,.txt,.md,image/*,application/pdf,text/plain">
       </div>
       <div>
         <label for="lang">Answer language</label>
@@ -174,9 +174,71 @@ function updateCount(){
   $("count").textContent = n ? `${n} characters` + (n > MAX_CHARS ? ` (only the first ${MAX_CHARS} are used – paste one section at a time for best results)` : "") : "";
 }
 $("notes").addEventListener("input", updateCount);
+
+/* ---------- file upload: PDF, DOCX, image (OCR), text — all processed in the browser ---------- */
+const setMsg = t => { $("count").textContent = t; };
+const loadScript = src => new Promise((res, rej) => {
+  if (document.querySelector(`script[src="${src}"]`)) return res();
+  const s = document.createElement("script");
+  s.src = src; s.onload = res; s.onerror = () => rej(new Error("Could not load a helper library. Check your internet connection and try again."));
+  document.head.appendChild(s);
+});
+async function ocr(source){
+  await loadScript("https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js");
+  const r = await Tesseract.recognize(source, "eng+hin", {
+    logger: m => { if (m.status === "recognizing text") setMsg(`Reading text from image… ${Math.round(m.progress * 100)}%`); }
+  });
+  return r.data.text;
+}
+async function readPdf(file){
+  const V = "4.4.168";
+  const pdfjs = await import(`https://cdn.jsdelivr.net/npm/pdfjs-dist@${V}/build/pdf.min.mjs`);
+  pdfjs.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${V}/build/pdf.worker.min.mjs`;
+  const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  let text = "";
+  for (let i = 1; i <= pdf.numPages && text.length < MAX_CHARS * 2; i++) {
+    setMsg(`Reading PDF page ${i} of ${pdf.numPages}…`);
+    const page = await pdf.getPage(i);
+    const c = await page.getTextContent();
+    text += c.items.map(x => x.str).join(" ") + "\n\n";
+  }
+  if (text.trim().length < 50) { // scanned PDF with no text layer → OCR the first pages
+    text = "";
+    for (let i = 1; i <= Math.min(pdf.numPages, 5); i++) {
+      setMsg(`Scanned PDF detected – reading page ${i}…`);
+      const page = await pdf.getPage(i);
+      const vp = page.getViewport({ scale: 2 });
+      const cv = document.createElement("canvas"); cv.width = vp.width; cv.height = vp.height;
+      await page.render({ canvasContext: cv.getContext("2d"), viewport: vp }).promise;
+      text += (await ocr(cv)) + "\n\n";
+    }
+  }
+  return text;
+}
+async function readDocx(file){
+  await loadScript("https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js");
+  const r = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+  return r.value;
+}
 $("file").addEventListener("change", async e => {
   const f = e.target.files[0]; if (!f) return;
-  $("notes").value = await f.text(); updateCount();
+  const name = f.name.toLowerCase();
+  try {
+    setMsg(`Reading ${f.name}…`);
+    let text;
+    if (f.type.startsWith("image/")) text = await ocr(f);
+    else if (name.endsWith(".pdf")) text = await readPdf(f);
+    else if (name.endsWith(".docx")) text = await readDocx(f);
+    else if (name.endsWith(".doc")) throw new Error("Old .doc files aren't supported. Please save it as .docx or PDF and upload again.");
+    else text = await f.text();
+    text = text.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+    if (text.length < 20) throw new Error("No readable text found in this file.");
+    $("notes").value = text; updateCount();
+  } catch (err) {
+    console.error(err);
+    setMsg("❌ " + (err.message || err));
+  }
+  e.target.value = "";
 });
 $("sample").onclick = () => {
   $("notes").value = `Photosynthesis is the process by which green plants, algae and some bacteria convert light energy into chemical energy. It takes place mainly in the chloroplasts of leaf cells, which contain a green pigment called chlorophyll. Chlorophyll absorbs sunlight, mostly in the red and blue wavelengths, and reflects green light, which is why leaves look green.
