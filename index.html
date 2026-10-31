@@ -55,6 +55,7 @@
   .pline{padding:8px 10px;border-radius:10px;cursor:pointer;border:1px solid transparent}
   .pline.now{background:var(--card2);border-color:var(--accent)}
   .pline b{color:var(--accent)}
+  .savedbtns{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
   footer{color:var(--muted);font-size:.8rem;text-align:center;margin-top:30px}
   a{color:var(--accent)}
 </style>
@@ -67,21 +68,36 @@
       <h1>Saarthi <span style="color:var(--muted);font-weight:500">· सारथी</span></h1>
     </div>
   </header>
-  <p class="tag">Your private AI study buddy. Paste or upload any chapter and get a summary, a simple explanation, a quiz, flashcards or answers.</p>
+  <p class="tag">Your private AI study buddy. Paste or upload any chapter and get a summary, a simple explanation, a quiz, flashcards, answers or a spoken podcast.</p>
   <div class="badges">
     <span class="badge">🔒 100% private – runs in your browser</span>
     <span class="badge">🪶 Tiny open-source model (~80 MB)</span>
     <span class="badge">📡 Works offline after first load</span>
     <span class="badge">💸 No API key, no server, free</span>
+    <span class="badge">💾 Saved while you study, deleted when you close it</span>
   </div>
 
   <div class="card">
-    <h2>1 · AI model <span style="color:var(--muted);font-weight:400;font-size:.85rem">· LaMini-Flan-T5 77M (open source)</span></h2>
+    <h2>1 · AI model <span style="color:var(--muted);font-weight:400;font-size:.85rem">· open source, loaded straight from Hugging Face</span></h2>
     <div class="row">
-      <div class="status" id="status" style="margin:0">Starting…</div>
-      <div style="flex:0 0 auto"><button id="loadBtn" class="sec">Reload model</button></div>
+      <div>
+        <label for="modelSel">Choose a model</label>
+        <select id="modelSel">
+          <option value="Xenova/LaMini-Flan-T5-77M">Small &amp; fast – LaMini-Flan-T5 77M (about 80 MB, default)</option>
+          <option value="Xenova/LaMini-Flan-T5-248M">Better – LaMini-Flan-T5 248M (bigger download)</option>
+          <option value="Xenova/LaMini-Flan-T5-783M">Best – LaMini-Flan-T5 783M (large download, needs a strong device)</option>
+          <option value="custom">Other Hugging Face model…</option>
+        </select>
+      </div>
+      <div id="customWrap" style="display:none">
+        <label for="customModel">Hugging Face model ID</label>
+        <input type="text" id="customModel" placeholder="e.g. Xenova/flan-t5-base">
+      </div>
+      <div style="flex:0 0 auto"><button id="loadBtn" class="sec">Load model</button></div>
     </div>
     <div class="bar"><i id="bar"></i></div>
+    <div class="status" id="status">Starting…</div>
+    <div class="status">The model downloads from Hugging Face to your browser the first time, then it is saved on your device. Bigger models answer better but need more storage, memory and time. Other models must work with Transformers.js and be text-to-text (T5 / Flan-T5 style).</div>
   </div>
 
   <div class="card">
@@ -140,6 +156,12 @@
       <button id="podBtn" disabled>🎙️ Create podcast</button>
       <div class="status" id="podStatus">Two hosts, Asha and Ravi, talk through your notes and quiz you at the end of each idea.</div>
       <div class="status" id="podVoiceNote"></div>
+      <div class="row" style="margin-top:8px">
+        <div><label for="voiceA">Asha's voice (female)</label><select id="voiceA"></select></div>
+        <div><label for="voiceR">Ravi's voice (male)</label><select id="voiceR"></select></div>
+        <div style="flex:0 0 auto"><button class="sec" id="voiceTest">🔈 Test voices</button></div>
+      </div>
+      <div class="status">Browsers don't say whether a voice is male or female, so the page guesses from the voice name. If a voice sounds wrong, pick another one here.</div>
       <div class="row" id="podCtl" style="display:none;margin-top:10px">
         <div style="flex:0 0 auto;display:flex;gap:8px;flex-wrap:wrap">
           <button id="podPlay">▶ Play</button>
@@ -159,7 +181,15 @@
     </div>
   </div>
 
-  <footer>Built for a hackathon with ❤️ · Powered by <a href="https://github.com/xenova/transformers.js" target="_blank" rel="noopener">Transformers.js</a> &amp; the open-source LaMini-Flan-T5 model · Your notes never leave your device.<br>This is a very small model, so keep notes in English and double-check important answers.</footer>
+  <div class="card">
+    <h2>4 · Saved in this tab <span style="color:var(--muted);font-weight:400;font-size:.85rem">· deleted when you close the website</span></h2>
+    <div class="status">Your results stay here if you refresh the page, so you can come back to them. Download anything you want to keep.</div>
+    <div class="status" id="savedNone">Nothing saved yet. Make a summary, quiz, flashcards or podcast above and it will appear here.</div>
+    <div class="savedbtns" id="savedBtns"></div>
+    <button class="sec" id="clearBtn">🗑️ Clear saved work</button>
+  </div>
+
+  <footer>Built for a hackathon with ❤️ · Powered by <a href="https://github.com/xenova/transformers.js" target="_blank" rel="noopener">Transformers.js</a> &amp; open-source models from <a href="https://huggingface.co" target="_blank" rel="noopener">Hugging Face</a> · Your notes never leave your device. Your work is kept only in this browser tab.<br>The default model is very small, so keep notes in English and double-check important answers.</footer>
 </div>
 
 <script type="module">
@@ -167,16 +197,56 @@ import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@xenova/transformers
 env.allowLocalModels = false;
 
 const $ = id => document.getElementById(id);
-const MODEL = "Xenova/LaMini-Flan-T5-77M";
+const DEFAULT_MODEL = "Xenova/LaMini-Flan-T5-77M";
 const MAX_CHARS = 200000; // about 80-100 pages of text
-let gen = null, busy = false, mode = "summary", abort = false, loading = false;
+let gen = null, busy = false, mode = "summary", abort = false, loading = false, loadedModel = null;
 
-/* ---------- model loading (≈80 MB, cached after first time) ---------- */
+/* ---------- session storage: survives a refresh, deleted when the tab/website is closed ---------- */
+const mem = {};
+const store = {
+  get(k, d = null){ if (k in mem) return mem[k]; try { const v = sessionStorage.getItem("saarthi:" + k); if (v != null) return JSON.parse(v); } catch {} return d; },
+  set(k, v){ mem[k] = v; try { sessionStorage.setItem("saarthi:" + k, JSON.stringify(v)); } catch {} },
+  del(k){ delete mem[k]; try { sessionStorage.removeItem("saarthi:" + k); } catch {} }
+};
+function hashNum(s){ let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+const hashStr = s => hashNum(s).toString(36) + s.length.toString(36);
+function mulberry32(a){ return function(){ a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function seededShuffle(arr, seed){ const r = mulberry32(seed), a = arr.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(r() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+
+/* results are saved per (notes + model), so the same notes always give the same quiz, flashcards and podcast */
+const shown = {};
+function paneFor(kind){ return (kind === "summary" || kind === "simple") ? "plain" : kind; }
+function sigOf(pane, key, has, m = mode){ return (pane === "plain" ? m + "|" : "") + key + "|" + (has ? 1 : 0); }
+const selectedModel = () => $("modelSel").value === "custom" ? $("customModel").value.trim() : $("modelSel").value;
+const docKey = () => hashStr(notes()) + "|" + (loadedModel || selectedModel() || DEFAULT_MODEL);
+const outs = () => store.get("outs", {});
+function getOut(kind, key = docKey()){ const o = outs()[key]; return o ? o[kind] : undefined; }
+function setOut(kind, val, key = docKey()){
+  const all = outs();
+  all[key] = Object.assign(all[key] || {}, { [kind]: val, t: Date.now() });
+  Object.keys(all).sort((a, b) => (all[b].t || 0) - (all[a].t || 0)).slice(4).forEach(k => delete all[k]); // keep the 4 most recent notes
+  store.set("outs", all);
+  const pane = paneFor(kind);
+  shown[pane] = sigOf(pane, key, true, kind);
+  renderSaved();
+}
+
+/* ---------- model picker + loading (models come straight from Hugging Face, then are cached on this device) ---------- */
 function setReady(on){ ["runBtn","quizBtn","cardsBtn","askBtn","podBtn"].forEach(id => $(id).disabled = !on); }
+(function initModelUI(){
+  const saved = store.get("model", DEFAULT_MODEL);
+  if ([...$("modelSel").options].some(o => o.value === saved)) $("modelSel").value = saved;
+  else { $("modelSel").value = "custom"; $("customModel").value = saved; }
+  $("customWrap").style.display = $("modelSel").value === "custom" ? "" : "none";
+})();
+$("modelSel").onchange = () => { $("customWrap").style.display = $("modelSel").value === "custom" ? "" : "none"; };
+$("customModel").addEventListener("keydown", e => { if (e.key === "Enter") loadModel(); });
 
 async function loadModel(){
   if (loading) return;
-  loading = true; gen = null; setReady(false);
+  const id = selectedModel();
+  if (!id) { $("status").textContent = "Please type a Hugging Face model ID first."; return; }
+  loading = true; setReady(false);
   $("loadBtn").disabled = true; $("bar").style.width = "0%";
   $("status").textContent = "Starting…";
   const files = {};
@@ -191,27 +261,33 @@ async function loadModel(){
     }
   };
   try {
+    let g;
     try {
-      gen = await pipeline("text2text-generation", MODEL, { progress_callback: progress });
+      g = await pipeline("text2text-generation", id, { progress_callback: progress });
     } catch (err) {
       if (/quota/i.test(String(err.message || err))) {
         // browser has no room to cache → run without caching (re-downloads next visit)
         env.useBrowserCache = false;
         $("status").textContent = "Browser storage is full, loading without saving the model…";
-        gen = await pipeline("text2text-generation", MODEL, { progress_callback: progress });
+        g = await pipeline("text2text-generation", id, { progress_callback: progress });
       } else throw err;
     }
+    try { if (gen && gen.dispose) await gen.dispose(); } catch {}
+    gen = g; loadedModel = id; store.set("model", id);
     $("bar").style.width = "100%";
-    $("status").textContent = "✅ Model ready! Everything runs on your device.";
+    $("status").textContent = `✅ Model ready (${id.split("/").pop()}). Everything runs on your device.`;
     setReady(true);
+    showSaved();
   } catch (err) {
     console.error(err);
-    $("status").textContent = "❌ Could not load the model: " + (err.message || err) + ". Check your internet connection and press “Reload model”.";
+    const m = String(err.message || err);
+    const why = /404|not found|401|unauthorized|could not locate|unsupported/i.test(m) ? "model not found or not compatible with Transformers.js." : m;
+    $("status").textContent = `❌ Could not load ${id}: ${why} ` + (gen ? "Still using the previous model." : "Check your internet connection and press “Load model”.");
+    setReady(!!gen);
   }
   loading = false; $("loadBtn").disabled = false;
 }
 $("loadBtn").onclick = loadModel;
-loadModel();
 
 /* ---------- text helpers ---------- */
 const notes = () => $("notes").value.trim().slice(0, MAX_CHARS);
@@ -248,14 +324,21 @@ function updateCount(){
   const n = $("notes").value.trim().length;
   $("count").textContent = n ? `${n} characters` + (n > MAX_CHARS ? ` (very long file: only the first ${MAX_CHARS} characters are used)` : "") : "";
 }
-$("notes").addEventListener("input", updateCount);
+let notesTimer = null;
+function notesChanged(now){
+  updateCount();
+  clearTimeout(notesTimer);
+  const go = () => { store.set("notes", $("notes").value); showSaved(); };
+  if (now) go(); else notesTimer = setTimeout(go, 400);
+}
+$("notes").addEventListener("input", () => notesChanged(false));
 $("sample").onclick = () => {
   $("notes").value = `Photosynthesis is the process by which green plants, algae and some bacteria convert light energy into chemical energy. It takes place mainly in the chloroplasts of leaf cells, which contain a green pigment called chlorophyll. Chlorophyll absorbs sunlight, mostly in the red and blue wavelengths, and reflects green light, which is why leaves look green.
 
 The overall reaction is: carbon dioxide + water + light energy -> glucose + oxygen. Plants take in carbon dioxide through tiny pores called stomata and absorb water from the soil through their roots. The glucose produced is used by the plant for energy and growth, or stored as starch. Oxygen is released into the atmosphere as a by-product, which is essential for most living organisms.
 
 Photosynthesis has two stages. In the light-dependent reactions, which occur in the thylakoid membranes, light energy splits water molecules, releasing oxygen and producing the energy carriers ATP and NADPH. In the Calvin cycle, which occurs in the stroma, ATP and NADPH are used to convert carbon dioxide into glucose. Factors such as light intensity, carbon dioxide concentration and temperature affect the rate of photosynthesis.`;
-  updateCount();
+  notesChanged(true);
 };
 
 const setMsg = t => { $("count").textContent = t; };
@@ -315,7 +398,7 @@ $("file").addEventListener("change", async e => {
     else text = await f.text();
     text = text.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
     if (text.length < 20) throw new Error("No readable text found in this file.");
-    $("notes").value = text; updateCount();
+    $("notes").value = text; notesChanged(true);
   } catch (err) {
     console.error(err);
     setMsg("❌ " + (err.message || err));
@@ -333,14 +416,18 @@ $("modes").addEventListener("click", e => {
   $("cardsPane").style.display = mode === "cards" ? "" : "none";
   $("askPane").style.display = mode === "ask" ? "" : "none";
   $("podPane").style.display = mode === "podcast" ? "" : "none";
+  showSaved();
 });
 
-/* summary + explain simply (chunk by chunk) */
+/* summary + explain simply (chunk by chunk) – results are saved for this session */
 $("runBtn").onclick = async () => {
   if (busy || !needNotes()) return;
+  const simple = mode === "simple", kind = simple ? "simple" : "summary";
+  const savedText = getOut(kind);
+  if (savedText) { $("out").textContent = savedText; return; }
   busy = true; abort = false;
+  const key = docKey();
   $("stopBtn").style.display = ""; $("runBtn").disabled = true; $("out").textContent = "Thinking…";
-  const simple = mode === "simple";
   const chunks = pick(chunkText(notes(), simple ? 600 : 1000), simple ? 12 : 40); // whole document, in parts
   let result = "";
   for (let i = 0; i < chunks.length && !abort; i++) {
@@ -352,6 +439,7 @@ $("runBtn").onclick = async () => {
     $("out").textContent = result + (i < chunks.length - 1 ? `\n⏳ Working… part ${i + 1} of ${chunks.length} done` : "");
   }
   if (!result) $("out").textContent = "Couldn't generate anything. Try adding more text.";
+  else if (!abort) { $("out").textContent = result.trim(); setOut(kind, result.trim(), key); }
   $("stopBtn").style.display = "none"; $("runBtn").disabled = false; busy = false;
 };
 $("stopBtn").onclick = () => { abort = true; };
@@ -372,50 +460,64 @@ async function makeQA(count, onProgress){
   return items;
 }
 
-/* quiz */
-$("quizBtn").onclick = async () => {
-  if (busy || !needNotes()) return;
-  busy = true; $("quizBtn").disabled = true; $("quiz").innerHTML = "";
-  $("score").textContent = "Writing your quiz…";
-  const qa = await makeQA(5, (i, n) => { $("score").textContent = `Writing question ${i} of ${n}…`; });
-  busy = false; $("quizBtn").disabled = false;
-  if (qa.length < 2) { $("score").textContent = "Not enough content to build a quiz. Add more text and try again."; return; }
+/* quiz – the same notes always give the same quiz (and it is saved for this session) */
+function renderQuiz(items){
+  $("quiz").innerHTML = "";
   let done = 0, right = 0;
-  $("score").textContent = `Answer all ${qa.length} questions!`;
-  qa.forEach((it, i) => {
-    const wrongs = qa.filter((x, j) => j !== i && x.a.toLowerCase() !== it.a.toLowerCase()).map(x => x.a)
-      .sort(() => Math.random() - .5).slice(0, 3);
-    const options = [it.a, ...wrongs].sort(() => Math.random() - .5);
+  $("score").textContent = `Answer all ${items.length} questions!`;
+  items.forEach((it, i) => {
     const d = document.createElement("div"); d.className = "q";
     d.innerHTML = `<b>${i + 1}. ${esc(it.q)}</b>`;
-    options.forEach(opt => {
+    it.options.forEach(opt => {
       const b = document.createElement("button"); b.className = "opt"; b.textContent = opt;
       b.onclick = () => {
         if (d.dataset.done) return; d.dataset.done = 1; done++;
         if (opt === it.a) { b.classList.add("right"); right++; }
         else { b.classList.add("wrong"); [...d.querySelectorAll(".opt")].forEach(x => { if (x.textContent === it.a) x.classList.add("right"); }); }
-        $("score").textContent = done === qa.length ? `🎉 Score: ${right} / ${qa.length}` : `Answered ${done} / ${qa.length}`;
+        $("score").textContent = done === items.length ? `🎉 Score: ${right} / ${items.length}` : `Answered ${done} / ${items.length}`;
       };
       d.appendChild(b);
     });
     $("quiz").appendChild(d);
   });
+}
+$("quizBtn").onclick = async () => {
+  if (busy || !needNotes()) return;
+  const savedQuiz = getOut("quiz");
+  if (savedQuiz) { renderQuiz(savedQuiz); return; } // same questions, same order – a fresh attempt
+  busy = true; const key = docKey(); $("quizBtn").disabled = true; $("quiz").innerHTML = "";
+  $("score").textContent = "Writing your quiz…";
+  const qa = await makeQA(5, (i, n) => { $("score").textContent = `Writing question ${i} of ${n}…`; });
+  busy = false; $("quizBtn").disabled = false;
+  if (qa.length < 2) { $("score").textContent = "Not enough content to build a quiz. Add more text and try again."; return; }
+  const items = qa.map((it, i) => {
+    const others = seededShuffle(qa.filter((x, j) => j !== i && x.a.toLowerCase() !== it.a.toLowerCase()).map(x => x.a), hashNum(key + "|w" + i)).slice(0, 3);
+    return { q: it.q, a: it.a, options: seededShuffle([it.a, ...others], hashNum(key + "|o" + i)) };
+  });
+  setOut("quiz", items, key);
+  renderQuiz(items);
 };
 
-/* flashcards */
-$("cardsBtn").onclick = async () => {
-  if (busy || !needNotes()) return;
-  busy = true; $("cardsBtn").disabled = true; $("cards").innerHTML = "";
-  const qa = await makeQA(6, (i, n) => { $("cardsHint").textContent = `Making card ${i} of ${n}…`; });
-  busy = false; $("cardsBtn").disabled = false;
-  if (!qa.length) { $("cardsHint").textContent = "Couldn't make cards. Add more text and try again."; return; }
-  $("cardsHint").textContent = "Tap a card to flip it.";
-  qa.forEach(c => {
+/* flashcards – also the same every time for the same notes */
+function renderCards(items){
+  $("cards").innerHTML = ""; $("cardsHint").textContent = "Tap a card to flip it.";
+  items.forEach(c => {
     const el = document.createElement("div"); el.className = "fc";
     el.innerHTML = `<div><div class="f">${esc(c.q)}</div><div class="b">${esc(c.a)}</div></div>`;
     el.onclick = () => el.classList.toggle("flip");
     $("cards").appendChild(el);
   });
+}
+$("cardsBtn").onclick = async () => {
+  if (busy || !needNotes()) return;
+  const savedCards = getOut("cards");
+  if (savedCards) { renderCards(savedCards); return; }
+  busy = true; const key = docKey(); $("cardsBtn").disabled = true; $("cards").innerHTML = "";
+  const qa = await makeQA(6, (i, n) => { $("cardsHint").textContent = `Making card ${i} of ${n}…`; });
+  busy = false; $("cardsBtn").disabled = false;
+  if (!qa.length) { $("cardsHint").textContent = "Couldn't make cards. Add more text and try again."; return; }
+  setOut("cards", qa, key);
+  renderCards(qa);
 };
 
 /* ask: find the most relevant part of the notes, then answer from it */
@@ -433,11 +535,14 @@ async function ask(){
   const q = $("askInput").value.trim();
   if (!q || busy || !needNotes()) return;
   busy = true; $("askInput").value = ""; $("askBtn").disabled = true;
+  const key = docKey();
   addMsg("u", q);
   const m = addMsg("a", "…");
   const ctx = bestContext(q);
   const a = await run(`Answer the question using the context.\n\nContext: ${ctx}\n\nQuestion: ${q}`, 120);
-  m.textContent = a || "I couldn't find that in your notes.";
+  const reply = a || "I couldn't find that in your notes.";
+  m.textContent = reply;
+  setOut("chat", [...(getOut("chat", key) || []), { who: "u", text: q }, { who: "a", text: reply }], key);
   $("chatlog").scrollTop = 1e9;
   busy = false; $("askBtn").disabled = false;
 }
@@ -449,22 +554,50 @@ $("askBtn").onclick = ask;
 $("askInput").addEventListener("keydown", e => { if (e.key === "Enter") ask(); });
 
 /* ---------- podcast: two hosts talk through your notes (offline text-to-speech) ---------- */
+const POD_HINT = "Two hosts, Asha and Ravi, talk through your notes and quiz you at the end of each idea.";
 const tts = window.speechSynthesis || null;
-let podPool = [], podOffline = false, podLines = [], podPlaying = false, podPaused = false, podToken = 0;
+let podVoices = [], podOffline = false, podLines = [], podPlaying = false, podPaused = false, podToken = 0;
+
+// Browsers do not tell us a voice's gender, so we guess from the voice name
+const FEMALE_RE = /female|woman|zira|hazel|susan|samantha|victoria|karen|moira|tessa|fiona|allison|\bava\b|\bkate\b|serena|veena|catherine|linda|heera|jenny|\baria\b|\bemma\b|libby|sonia|natasha|clara|michelle|nicole|neerja|joanna|salli|kimberly|kendra|\bivy\b|\bamy\b|olivia|\bzoe\b|ellen/i;
+const MALE_RE = /\bmale\b|david|\bmark\b|george|richard|\balex\b|daniel|\bfred\b|\btom\b|oliver|rishi|\bravi\b|\bjames\b|\bguy\b|\bryan\b|\bliam\b|thomas|prabhat|christopher|\beric\b|arthur|gordon|aaron|matthew|\bjoey\b|justin|brian|russell|geraint|\blee\b/i;
+const genderOf = v => FEMALE_RE.test(v.name) ? "f" : MALE_RE.test(v.name) ? "m" : "?";
+const voiceLabel = v => `${v.name} (${v.lang})${v.localService ? "" : " – online"}`;
 
 function loadVoices(){
   if (!tts) { $("podVoiceNote").textContent = "❌ This browser has no text-to-speech. Please use Chrome, Edge or Safari."; $("podBtn").disabled = true; return; }
   const all = tts.getVoices();
   if (!all.length) { $("podVoiceNote").textContent = "Loading voices…"; return; }
-  const en = all.filter(v => /^en/i.test(v.lang));
-  const local = en.filter(v => v.localService);
-  podOffline = local.length > 0;
-  podPool = podOffline ? local : en;
+  let en = all.filter(v => /^en/i.test(v.lang));
+  if (!en.length) en = all.slice();
+  en.sort((a, b) => (Number(b.localService) - Number(a.localService)) || a.name.localeCompare(b.name));
+  podVoices = en;
+  podOffline = en.some(v => v.localService);
+  const best = g => en.find(v => v.localService && genderOf(v) === g) || en.find(v => genderOf(v) === g) || null;
+  const saved = store.get("voices", {});
+  const fill = (sel, key, g) => {
+    sel.innerHTML = "";
+    const d = document.createElement("option"); d.value = ""; d.textContent = "Browser default"; sel.appendChild(d);
+    en.forEach(v => {
+      const o = document.createElement("option"); o.value = v.name;
+      const gg = genderOf(v);
+      o.textContent = voiceLabel(v) + (gg === "f" ? " · female" : gg === "m" ? " · male" : "");
+      sel.appendChild(o);
+    });
+    sel.value = en.some(v => v.name === saved[key]) ? saved[key] : (best(g) ? best(g).name : "");
+  };
+  fill($("voiceA"), "a", "f"); fill($("voiceR"), "r", "m");
   $("podVoiceNote").textContent = podOffline
     ? "🔊 Offline voices found – the podcast plays without internet."
     : "⚠️ No offline English voice found on this device, so the browser may use an online voice (needs internet). For fully offline use, install an English voice in your system's speech settings.";
 }
+const saveVoices = () => store.set("voices", { a: $("voiceA").value, r: $("voiceR").value });
+$("voiceA").onchange = saveVoices; $("voiceR").onchange = saveVoices;
 if (tts) { loadVoices(); tts.addEventListener("voiceschanged", loadVoices); } else loadVoices();
+
+const voiceOf = who => { const n = $(who === 0 ? "voiceA" : "voiceR").value; return podVoices.find(v => v.name === n) || null; };
+// if a voice is not clearly the right gender, shift the pitch so Asha still sounds higher and Ravi lower
+const pitchFor = (who, v) => (v && genderOf(v) === (who === 0 ? "f" : "m")) ? 1 : (who === 0 ? 1.25 : 0.8);
 
 const endSentence = t => (/[.!?]$/.test(t) ? t : t + ".");
 function podMark(i){
@@ -477,22 +610,24 @@ function stopPod(){
   if (tts) tts.cancel();
   podMark(-1); $("podPause").textContent = "⏸ Pause";
 }
+function say(who, text, token, onend){
+  const u = new SpeechSynthesisUtterance(text);
+  const v = voiceOf(who);
+  if (v) { u.voice = v; u.lang = v.lang; }
+  u.rate = parseFloat($("podRate").value) || 1;
+  u.pitch = pitchFor(who, v);
+  u.onend = () => { if (token === podToken && onend) onend(); };
+  u.onerror = () => { if (token === podToken) podPlaying = false; };
+  setTimeout(() => { if (token === podToken) tts.speak(u); }, 60);
+}
 function speakFrom(i){
   if (!tts) return;
   const token = ++podToken;
   tts.cancel();
   if (i >= podLines.length) { podPlaying = false; podMark(-1); return; }
   podPlaying = true; podPaused = false; $("podPause").textContent = "⏸ Pause";
-  const L = podLines[i];
-  const u = new SpeechSynthesisUtterance(L.text);
-  const v = podPool[L.who] || podPool[0];
-  if (v) { u.voice = v; u.lang = v.lang; }
-  u.rate = parseFloat($("podRate").value) || 1;
-  u.pitch = podPool.length > 1 ? 1 : (L.who === 0 ? 1.15 : 0.85); // one voice only → change pitch so the hosts still sound different
-  u.onend = () => { if (token === podToken && podPlaying) speakFrom(i + 1); };
-  u.onerror = () => { if (token === podToken) podPlaying = false; };
   podMark(i);
-  setTimeout(() => { if (token === podToken) tts.speak(u); }, 60);
+  say(podLines[i].who, podLines[i].text, token, () => { if (podPlaying) speakFrom(i + 1); });
 }
 $("podPlay").onclick = () => speakFrom(0);
 $("podStop").onclick = stopPod;
@@ -501,11 +636,32 @@ $("podPause").onclick = () => {
   if (podPaused) { tts.resume(); podPaused = false; $("podPause").textContent = "⏸ Pause"; }
   else { tts.pause(); podPaused = true; $("podPause").textContent = "▶ Resume"; }
 };
+$("voiceTest").onclick = () => {
+  if (!tts) return;
+  stopPod();
+  const token = podToken;
+  say(0, "Hi, I'm Asha.", token, () => say(1, "And I'm Ravi.", token));
+};
 window.addEventListener("pagehide", () => { if (tts) tts.cancel(); });
 
+function renderPod(lines){
+  stopPod();
+  podLines = lines;
+  $("podScript").innerHTML = "";
+  lines.forEach((L, i) => {
+    const d = document.createElement("div"); d.className = "pline";
+    const b = document.createElement("b"); b.textContent = (L.who === 0 ? "Asha: " : "Ravi: ");
+    d.appendChild(b); d.appendChild(document.createTextNode(L.text));
+    d.onclick = () => speakFrom(i);
+    $("podScript").appendChild(d);
+  });
+  $("podCtl").style.display = lines.length ? "" : "none";
+}
 $("podBtn").onclick = async () => {
   if (busy || !needNotes()) return;
-  busy = true; $("podBtn").disabled = true; stopPod();
+  const savedPod = getOut("pod");
+  if (savedPod) { renderPod(savedPod); $("podStatus").textContent = "✅ Saved podcast loaded (same as before). Press Play."; return; }
+  busy = true; const key = docKey(); $("podBtn").disabled = true; stopPod();
   $("podScript").innerHTML = ""; $("podCtl").style.display = "none";
   const chunks = pick(chunkText(notes(), 500), 5);
   const openers = ["Let's start with this:", "Next up:", "Here's another key idea:", "Moving on:", "And finally:"];
@@ -527,18 +683,97 @@ $("podBtn").onclick = async () => {
   }
   lines.push({ who: 0, text: "And that's the recap of your notes!" });
   lines.push({ who: 1, text: "Now try the quiz and flashcards to lock it in. Happy studying!" });
-  podLines = lines;
-  podLines.forEach((L, i) => {
-    const d = document.createElement("div"); d.className = "pline";
-    const b = document.createElement("b"); b.textContent = (L.who === 0 ? "Asha: " : "Ravi: ");
-    d.appendChild(b); d.appendChild(document.createTextNode(L.text));
-    d.onclick = () => speakFrom(i);
-    $("podScript").appendChild(d);
-  });
+  setOut("pod", lines, key);
+  renderPod(lines);
   $("podStatus").textContent = "✅ Podcast ready! Press Play, or tap any line to start from there.";
-  $("podCtl").style.display = "";
   busy = false; $("podBtn").disabled = false;
 };
+
+/* ---------- show saved work again (after a refresh, or when you come back to a mode) ---------- */
+function showPane(pane, key, has, draw){
+  const s = sigOf(pane, key, has);
+  if (shown[pane] === s) return;
+  shown[pane] = s; draw();
+}
+function showSaved(){
+  if (busy) { renderSaved(); return; }
+  const key = docKey(), o = outs()[key] || {};
+  const plain = mode === "simple" ? o.simple : o.summary;
+  showPane("plain", key, !!plain, () => { $("out").textContent = plain || ""; });
+  showPane("quiz", key, !!o.quiz, () => { if (o.quiz) renderQuiz(o.quiz); else { $("quiz").innerHTML = ""; $("score").textContent = ""; } });
+  showPane("cards", key, !!o.cards, () => { if (o.cards) renderCards(o.cards); else { $("cards").innerHTML = ""; $("cardsHint").textContent = ""; } });
+  showPane("pod", key, !!o.pod, () => {
+    if (o.pod) { renderPod(o.pod); $("podStatus").textContent = "✅ Saved podcast loaded. Press Play."; }
+    else { renderPod([]); $("podStatus").textContent = POD_HINT; }
+  });
+  showPane("chat", key, !!o.chat, () => { $("chatlog").innerHTML = ""; (o.chat || []).forEach(m => addMsg(m.who, m.text)); });
+  renderSaved();
+}
+
+/* ---------- downloads ---------- */
+const SAVE_KINDS = [
+  ["summary", "📝 Summary (.txt)"], ["simple", "👶 Simple explanation (.txt)"], ["quiz", "❓ Quiz with answers (.txt)"],
+  ["cards", "🗂️ Flashcards (.csv)"], ["pod", "🎙️ Podcast script (.txt)"], ["chat", "💬 Questions & answers (.txt)"]
+];
+function textOf(kind, o){
+  switch (kind) {
+    case "summary": return "SUMMARY\n\n" + o.summary + "\n";
+    case "simple": return "SIMPLE EXPLANATION\n\n" + o.simple + "\n";
+    case "quiz": return "QUIZ\n\n" + o.quiz.map((it, i) =>
+      `${i + 1}. ${it.q}\n` + it.options.map((x, j) => `   ${"ABCD"[j]}) ${x}`).join("\n") + `\n   Answer: ${"ABCD"[it.options.indexOf(it.a)]}) ${it.a}\n`).join("\n");
+    case "cards": return "FLASHCARDS\n\n" + o.cards.map((c, i) => `${i + 1}. Front: ${c.q}\n   Back: ${c.a}\n`).join("\n");
+    case "pod": return "PODCAST SCRIPT\n\n" + o.pod.map(L => `${L.who === 0 ? "Asha" : "Ravi"}: ${L.text}`).join("\n") + "\n";
+    case "chat": return "QUESTIONS & ANSWERS\n\n" + o.chat.map(m => `${m.who === "u" ? "Q" : "A"}: ${m.text}`).join("\n") + "\n";
+  }
+  return "";
+}
+const csvOf = cards => "﻿Front,Back\n" + cards.map(c => [c.q, c.a].map(x => '"' + String(x).replace(/"/g, '""') + '"').join(",")).join("\n") + "\n";
+function download(name, text, type = "text/plain"){
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], { type: type + ";charset=utf-8" }));
+  a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+}
+function downloadKind(k){
+  const o = outs()[docKey()] || {};
+  if (!o[k]) return;
+  if (k === "cards") download("saarthi-flashcards.csv", csvOf(o.cards), "text/csv");
+  else download(`saarthi-${k === "pod" ? "podcast" : k}.txt`, textOf(k, o));
+}
+function downloadAll(){
+  const o = outs()[docKey()] || {};
+  const parts = SAVE_KINDS.map(([k]) => k).filter(k => o[k]).map(k => textOf(k, o));
+  if (!parts.length) return;
+  download("saarthi-study-pack.txt", `SAARTHI STUDY PACK\nMade on ${new Date().toLocaleString()}\n\n` + parts.join("\n----------------------------------------\n\n"));
+}
+function renderSaved(){
+  const o = outs()[docKey()] || {};
+  const box = $("savedBtns"); box.innerHTML = "";
+  const have = SAVE_KINDS.filter(([k]) => o[k]);
+  $("savedNone").style.display = have.length ? "none" : "";
+  have.forEach(([k, label]) => {
+    const b = document.createElement("button"); b.className = "sec"; b.textContent = "⬇ " + label;
+    b.onclick = () => downloadKind(k); box.appendChild(b);
+  });
+  if (have.length) {
+    const b = document.createElement("button"); b.textContent = "📦 Download everything";
+    b.onclick = downloadAll; box.appendChild(b);
+  }
+}
+$("clearBtn").onclick = () => {
+  if (!confirm("Delete all saved work and your notes from this tab?")) return;
+  stopPod(); store.del("outs"); store.del("notes");
+  $("notes").value = ""; updateCount();
+  Object.keys(shown).forEach(k => delete shown[k]);
+  $("out").textContent = "";
+  showSaved();
+};
+
+/* ---------- start ---------- */
+const savedNotes = store.get("notes", "");
+if (savedNotes) { $("notes").value = savedNotes; updateCount(); }
+showSaved();
+loadModel();
 </script>
 </body>
 </html>
