@@ -52,6 +52,9 @@
   .msg{padding:9px 12px;border-radius:12px;max-width:88%;white-space:pre-wrap}
   .msg.u{align-self:flex-end;background:var(--accent2)}
   .msg.a{align-self:flex-start;background:var(--card2);border:1px solid var(--border)}
+  .pline{padding:8px 10px;border-radius:10px;cursor:pointer;border:1px solid transparent}
+  .pline.now{background:var(--card2);border-color:var(--accent)}
+  .pline b{color:var(--accent)}
   footer{color:var(--muted);font-size:.8rem;text-align:center;margin-top:30px}
   a{color:var(--accent)}
 </style>
@@ -104,6 +107,7 @@
       <button data-m="quiz">❓ Quiz me</button>
       <button data-m="cards">🗂️ Flashcards</button>
       <button data-m="ask">💬 Ask a question</button>
+      <button data-m="podcast">🎙️ Podcast</button>
     </div>
 
     <div id="plainPane">
@@ -131,6 +135,28 @@
         <div style="flex:0 0 auto"><button id="askBtn" disabled>Send</button></div>
       </div>
     </div>
+
+    <div id="podPane" style="display:none">
+      <button id="podBtn" disabled>🎙️ Create podcast</button>
+      <div class="status" id="podStatus">Two hosts, Asha and Ravi, talk through your notes and quiz you at the end of each idea.</div>
+      <div class="status" id="podVoiceNote"></div>
+      <div class="row" id="podCtl" style="display:none;margin-top:10px">
+        <div style="flex:0 0 auto;display:flex;gap:8px;flex-wrap:wrap">
+          <button id="podPlay">▶ Play</button>
+          <button class="sec" id="podPause">⏸ Pause</button>
+          <button class="sec" id="podStop">⏹ Stop</button>
+        </div>
+        <div style="max-width:160px">
+          <label for="podRate">Speed</label>
+          <select id="podRate">
+            <option value="0.8">Slow</option>
+            <option value="1" selected>Normal</option>
+            <option value="1.25">Fast</option>
+          </select>
+        </div>
+      </div>
+      <div id="podScript" style="margin-top:12px"></div>
+    </div>
   </div>
 
   <footer>Built for a hackathon with ❤️ · Powered by <a href="https://github.com/xenova/transformers.js" target="_blank" rel="noopener">Transformers.js</a> &amp; the open-source LaMini-Flan-T5 model · Your notes never leave your device.<br>This is a very small model, so keep notes in English and double-check important answers.</footer>
@@ -146,7 +172,7 @@ const MAX_CHARS = 200000; // about 80-100 pages of text
 let gen = null, busy = false, mode = "summary", abort = false, loading = false;
 
 /* ---------- model loading (≈80 MB, cached after first time) ---------- */
-function setReady(on){ ["runBtn","quizBtn","cardsBtn","askBtn"].forEach(id => $(id).disabled = !on); }
+function setReady(on){ ["runBtn","quizBtn","cardsBtn","askBtn","podBtn"].forEach(id => $(id).disabled = !on); }
 
 async function loadModel(){
   if (loading) return;
@@ -306,6 +332,7 @@ $("modes").addEventListener("click", e => {
   $("quizPane").style.display = mode === "quiz" ? "" : "none";
   $("cardsPane").style.display = mode === "cards" ? "" : "none";
   $("askPane").style.display = mode === "ask" ? "" : "none";
+  $("podPane").style.display = mode === "podcast" ? "" : "none";
 });
 
 /* summary + explain simply (chunk by chunk) */
@@ -420,6 +447,98 @@ function addMsg(who, t){
 }
 $("askBtn").onclick = ask;
 $("askInput").addEventListener("keydown", e => { if (e.key === "Enter") ask(); });
+
+/* ---------- podcast: two hosts talk through your notes (offline text-to-speech) ---------- */
+const tts = window.speechSynthesis || null;
+let podPool = [], podOffline = false, podLines = [], podPlaying = false, podPaused = false, podToken = 0;
+
+function loadVoices(){
+  if (!tts) { $("podVoiceNote").textContent = "❌ This browser has no text-to-speech. Please use Chrome, Edge or Safari."; $("podBtn").disabled = true; return; }
+  const all = tts.getVoices();
+  if (!all.length) { $("podVoiceNote").textContent = "Loading voices…"; return; }
+  const en = all.filter(v => /^en/i.test(v.lang));
+  const local = en.filter(v => v.localService);
+  podOffline = local.length > 0;
+  podPool = podOffline ? local : en;
+  $("podVoiceNote").textContent = podOffline
+    ? "🔊 Offline voices found – the podcast plays without internet."
+    : "⚠️ No offline English voice found on this device, so the browser may use an online voice (needs internet). For fully offline use, install an English voice in your system's speech settings.";
+}
+if (tts) { loadVoices(); tts.addEventListener("voiceschanged", loadVoices); } else loadVoices();
+
+const endSentence = t => (/[.!?]$/.test(t) ? t : t + ".");
+function podMark(i){
+  const kids = [...$("podScript").children];
+  kids.forEach((el, j) => el.classList.toggle("now", j === i));
+  if (i >= 0 && kids[i]) kids[i].scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+function stopPod(){
+  podToken++; podPlaying = false; podPaused = false;
+  if (tts) tts.cancel();
+  podMark(-1); $("podPause").textContent = "⏸ Pause";
+}
+function speakFrom(i){
+  if (!tts) return;
+  const token = ++podToken;
+  tts.cancel();
+  if (i >= podLines.length) { podPlaying = false; podMark(-1); return; }
+  podPlaying = true; podPaused = false; $("podPause").textContent = "⏸ Pause";
+  const L = podLines[i];
+  const u = new SpeechSynthesisUtterance(L.text);
+  const v = podPool[L.who] || podPool[0];
+  if (v) { u.voice = v; u.lang = v.lang; }
+  u.rate = parseFloat($("podRate").value) || 1;
+  u.pitch = podPool.length > 1 ? 1 : (L.who === 0 ? 1.15 : 0.85); // one voice only → change pitch so the hosts still sound different
+  u.onend = () => { if (token === podToken && podPlaying) speakFrom(i + 1); };
+  u.onerror = () => { if (token === podToken) podPlaying = false; };
+  podMark(i);
+  setTimeout(() => { if (token === podToken) tts.speak(u); }, 60);
+}
+$("podPlay").onclick = () => speakFrom(0);
+$("podStop").onclick = stopPod;
+$("podPause").onclick = () => {
+  if (!podPlaying || !tts) return;
+  if (podPaused) { tts.resume(); podPaused = false; $("podPause").textContent = "⏸ Pause"; }
+  else { tts.pause(); podPaused = true; $("podPause").textContent = "▶ Resume"; }
+};
+window.addEventListener("pagehide", () => { if (tts) tts.cancel(); });
+
+$("podBtn").onclick = async () => {
+  if (busy || !needNotes()) return;
+  busy = true; $("podBtn").disabled = true; stopPod();
+  $("podScript").innerHTML = ""; $("podCtl").style.display = "none";
+  const chunks = pick(chunkText(notes(), 500), 5);
+  const openers = ["Let's start with this:", "Next up:", "Here's another key idea:", "Moving on:", "And finally:"];
+  const lines = [
+    { who: 0, text: "Welcome to the Saarthi study podcast! I'm Asha." },
+    { who: 1, text: "And I'm Ravi. Today we're going through your notes, one idea at a time." }
+  ];
+  for (let i = 0; i < chunks.length; i++) {
+    $("podStatus").textContent = `Writing the podcast… part ${i + 1} of ${chunks.length}`;
+    const s = await run(`Summarize the following text in one clear sentence:\n\n${chunks[i]}`, 70);
+    let q = await run(`Write one question that can be answered using this text:\n\n${chunks[i]}`, 40);
+    let a = q.length >= 8 ? await run(`Answer the question briefly using the text.\n\nText: ${chunks[i]}\n\nQuestion: ${q}`, 40) : "";
+    if (s.length > 5) lines.push({ who: 0, text: `${openers[Math.min(i, openers.length - 1)]} ${endSentence(s)}` });
+    if (q.length >= 8 && a.length > 1) {
+      if (!/\?$/.test(q)) q = q.replace(/[.!]+$/, "") + "?";
+      lines.push({ who: 1, text: `Quick question to test yourself: ${q}` });
+      lines.push({ who: 0, text: `The answer is: ${endSentence(a)}` });
+    }
+  }
+  lines.push({ who: 0, text: "And that's the recap of your notes!" });
+  lines.push({ who: 1, text: "Now try the quiz and flashcards to lock it in. Happy studying!" });
+  podLines = lines;
+  podLines.forEach((L, i) => {
+    const d = document.createElement("div"); d.className = "pline";
+    const b = document.createElement("b"); b.textContent = (L.who === 0 ? "Asha: " : "Ravi: ");
+    d.appendChild(b); d.appendChild(document.createTextNode(L.text));
+    d.onclick = () => speakFrom(i);
+    $("podScript").appendChild(d);
+  });
+  $("podStatus").textContent = "✅ Podcast ready! Press Play, or tap any line to start from there.";
+  $("podCtl").style.display = "";
+  busy = false; $("podBtn").disabled = false;
+};
 </script>
 </body>
 </html>
